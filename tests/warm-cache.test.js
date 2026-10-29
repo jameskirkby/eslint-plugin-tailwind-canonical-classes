@@ -45,4 +45,22 @@ describe('warm canonical cache', () => {
     expect(canonicalize(['h-8'])).toEqual(['h-8']);
     expect(mockCanonicalizeSync).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps cached classes when Tailwind reports its files in a different order', async () => {
+    const pluginA = path.join(cacheDir, 'plugin-a.js');
+    const pluginB = path.join(cacheDir, 'plugin-b.js');
+    fs.writeFileSync(pluginA, 'export default {};\n');
+    fs.writeFileSync(pluginB, 'export default {};\n');
+    // Plugins load in parallel, so the order Tailwind reports them in can change between runs.
+    const answerWithFiles = (plugins) => (cssPath, candidates) => ({
+      canonical: candidates.map((candidate) => (candidate === 'w-[16px]' ? 'w-4' : candidate)),
+      files: [cssPath, ...plugins],
+    });
+
+    mockCanonicalizeSync.mockImplementation(answerWithFiles([pluginA, pluginB]));
+    (await freshCanonicalizer(24))(['mt-2']);
+
+    mockCanonicalizeSync.mockImplementation(answerWithFiles([pluginB, pluginA]));
+    expect((await freshCanonicalizer(24))(['mt-2', 'w-[16px]'])).toEqual(['mt-2', 'w-4']);
+  });
 });

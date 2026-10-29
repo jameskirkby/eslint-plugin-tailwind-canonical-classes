@@ -141,22 +141,32 @@ export function createClassCanonicalizer(
       : openStylesheet(cacheDir, readManifest(cacheDir, cssPath), rem);
   stylesheets.set(id, stylesheet);
 
-  return (candidates) => {
+  const fillTable = (candidates: string[]): void => {
     const missing = [...new Set(candidates.filter((candidate) => !stylesheet.table.has(candidate)))];
-    if (missing.length > 0) {
-      canonicalizeSync ??= createSyncFn<CanonicalizeInWorker>(workerPath);
-      const { canonical, files } = canonicalizeSync(cssPath, missing, { rem });
-      if (files.join('\0') !== stylesheet.files.join('\0')) {
-        stylesheet = openStylesheet(cacheDir, files, rem);
-        stylesheets.set(id, stylesheet);
-        writeManifest(cacheDir, cssPath, files);
-      }
-      const answers = missing.map((candidate, index): [string, string] => [candidate, canonical[index]]);
-      for (const [candidate, value] of answers) {
-        stylesheet.table.set(candidate, value);
-      }
-      appendTable(stylesheet.tablePath, answers);
+    if (missing.length === 0) {
+      return;
     }
+    canonicalizeSync ??= createSyncFn<CanonicalizeInWorker>(workerPath);
+    const { canonical, files } = canonicalizeSync(cssPath, missing, { rem });
+    const filesChanged = files.join('\0') !== stylesheet.files.join('\0');
+    if (filesChanged) {
+      stylesheet = openStylesheet(cacheDir, files, rem);
+      stylesheets.set(id, stylesheet);
+      writeManifest(cacheDir, cssPath, files);
+    }
+    const answers = missing.map((candidate, index): [string, string] => [candidate, canonical[index]]);
+    for (const [candidate, value] of answers) {
+      stylesheet.table.set(candidate, value);
+    }
+    appendTable(stylesheet.tablePath, answers);
+    if (filesChanged) {
+      // The other candidates were hits in the previous table, which the new one may not hold.
+      fillTable(candidates);
+    }
+  };
+
+  return (candidates) => {
+    fillTable(candidates);
     return candidates.map((candidate) => stylesheet.table.get(candidate)!);
   };
 }
